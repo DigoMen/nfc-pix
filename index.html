@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#171526"><title>Pagamento via Pix</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#211b32;background:#f5f3fa}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px}
+main{width:min(100%,440px);background:white;border-radius:24px;padding:28px;box-shadow:0 12px 40px #211b3214}
+.logo{width:48px;height:48px;border-radius:15px;background:#e9e3fa;display:grid;place-items:center;color:#5939a5;font-size:25px}
+h1{font-size:25px;margin:18px 0 5px}p{color:#6d6878;line-height:1.45;margin:6px 0 20px}
+label{display:block;font-weight:650;margin:18px 0 8px}input{width:100%;padding:16px;border:1px solid #d9d5e2;border-radius:12px;font-size:22px;outline-color:#6747b5}
+button{width:100%;border:0;border-radius:12px;padding:15px;font-size:16px;font-weight:700;background:#6545ae;color:white;margin-top:14px;cursor:pointer}
+button.secondary{background:#eeeaf6;color:#49347e}.card{background:#f7f5fb;border-radius:16px;padding:18px;margin-top:20px;text-align:center}
+#qrcode{display:flex;justify-content:center;margin:16px auto}#qrcode img,#qrcode canvas{max-width:100%;height:auto!important}
+.code{font-size:12px;word-break:break-all;text-align:left;background:white;padding:12px;border-radius:10px;max-height:110px;overflow:auto}
+.muted{font-size:12px;color:#777184;margin-top:20px;text-align:center}
+.hidden{display:none}.error{color:#b42318;font-size:13px;margin-top:10px}
+</style>
+</head>
+<body><main>
+<div class="logo">₱</div>
+<h1>Pagamento via Pix</h1>
+<p>Informe quanto deseja pagar. Confira os dados do recebedor no aplicativo do seu banco antes de confirmar.</p>
+<div id="recipient" class="card" style="text-align:left;margin-top:0">
+<strong id="merchant">Carregando recebedor…</strong><div id="city" style="color:#777;margin-top:4px"></div>
+</div>
+<label for="amount">Valor do pagamento (R$)</label>
+<input id="amount" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="Valor em reais">
+<button id="generate">Gerar Pix</button><div id="error" class="error" role="alert"></div>
+<section id="result" class="hidden">
+<div class="card"><strong>Escaneie o QR Code com o app do seu banco</strong><div id="qrcode"></div>
+<div style="font-size:13px;color:#716b7e">Ou copie o código Pix abaixo</div><div class="code" id="payload"></div>
+<button id="copy">Copiar Pix Copia e Cola</button></div>
+</section>
+<div class="muted">Pagamento processado pelo banco do pagador. NFC Studio não recebe nem confirma pagamentos.</div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(()=>{
+const params=new URLSearchParams(location.search);
+const key=params.get('k')||'', name=(params.get('n')||'').toUpperCase(), city=(params.get('c')||'').toUpperCase();
+const $=id=>document.getElementById(id);
+const normalize=(s,max)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9 $&*+\-./:]/g,'').slice(0,max);
+$('merchant').textContent=name||'Recebedor não configurado';
+$('city').textContent=city;
+if(!key||!name||!city){$('error').textContent='Link incompleto. Solicite ao vendedor que configure novamente a tag Pix.';$('generate').disabled=true;return}
+const tlv=(id,value)=>id+String(value.length).padStart(2,'0')+value;
+function crc16(data){let crc=0xffff;for(const b of new TextEncoder().encode(data)){crc^=b<<8;for(let i=0;i<8;i++)crc=(crc&0x8000)?((crc<<1)^0x1021)&0xffff:(crc<<1)&0xffff}return crc.toString(16).toUpperCase().padStart(4,'0')}
+function makePix(amount){
+ const account=tlv('00','BR.GOV.BCB.PIX')+tlv('01',key);
+ const additional=tlv('05','***');
+ const fields=tlv('00','01')+tlv('01','11')+tlv('26',account)+tlv('52','0000')+tlv('53','986')+tlv('54',amount)+tlv('58','BR')+tlv('59',normalize(name,25))+tlv('60',normalize(city,15))+tlv('62',additional);
+ const partial=fields+'6304';return partial+crc16(partial);
+}
+function parseAmount(){let raw=$('amount').value.trim().replace(/\s/g,'').replace(/\./g,'').replace(',','.');if(!/^\d+(\.\d{1,2})?$/.test(raw))return null;let n=Number(raw);if(!Number.isFinite(n)||n<0.01||n>99999999.99)return null;return n.toFixed(2)}
+$('generate').addEventListener('click',()=>{
+ $('error').textContent='';const amount=parseAmount();if(!amount){$('error').textContent='Digite um valor válido, por exemplo 15,00.';return}
+ const payload=makePix(amount);$('payload').textContent=payload;$('qrcode').innerHTML='';
+ if(typeof QRCode==='undefined'){$('error').textContent='Não foi possível carregar o gerador de QR Code. Verifique sua conexão.';return}
+ new QRCode($('qrcode'),{text:payload,width:220,height:220,correctLevel:QRCode.CorrectLevel.M});
+ $('result').classList.remove('hidden');
+});
+$('copy').addEventListener('click',async()=>{const value=$('payload').textContent;try{await navigator.clipboard.writeText(value);$('copy').textContent='Código copiado!'}catch(e){const t=document.createElement('textarea');t.value=value;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();$('copy').textContent='Código copiado!'}});
+$('amount').addEventListener('keydown',e=>{if(e.key==='Enter')$('generate').click()});
+})();
+</script></body></html>
